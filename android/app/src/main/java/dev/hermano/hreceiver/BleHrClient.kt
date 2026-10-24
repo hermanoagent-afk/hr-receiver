@@ -42,6 +42,7 @@ class BleHrClient(
     private var gatt: BluetoothGatt? = null
     private var lastDataAt = 0L
     private var connected = false
+    private var scanFailures = 0
     @Volatile private var running = false
 
     private val watchdog = object : Runnable {
@@ -58,45 +59,87 @@ class BleHrClient(
 
     @SuppressLint("MissingPermission")
     fun start() {
+        if (running) return // повторное нажатие кнопки не должно дёргать скан
         running = true
         android.os.Handler(context.mainLooper).postDelayed(watchdog, WATCHDOG_TICK_MS)
-        try {
-            scan()
-        } catch (e: Exception) {
-            // чаще всего: нет разрешения Bluetooth или BT выключен
-            onState("не могу сканировать: ${e.message}")
-        }
+        scan()
     }
 
     fun stop() {
         running = false
+        try { adapter?.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
         gatt?.disconnect()
         gatt?.close()
         gatt = null
     }
 
+    @SuppressLint("MissingPermission")
     private fun scan() {
         if (!running) return
-        onState("сканирование")
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(HR_SERVICE))
-            .build()
-        val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .build()
-        adapter.bluetoothLeScanner?.startScan(listOf(filter), settings, scanCallback)
+        val a = adapter
+        if (a == null || !a.isEnabled) {
+            onState("Bluetooth выключен — включи его, жду и пробую снова")
+            android.os.Handler(context.mainLooper).postDelayed({ scan() }, 5_000)
+            return
+        }
+        val scanner = a.bluetoothLeScanner ?: run {
+            onState("сканер недоступен, пробую через 5 с")
+            android.os.Handler(context.mainLooper).postDelayed({ scan() }, 5_000)
+            return
+        }
+
+        // сначала снимаем старую регистрацию — иначе система отвечает ошибкой 1
+        try { scanner.stopScan(scanCallback) } catch (_: Exception) {}
+
+        val useFilter = scanFailures < 2
+        onState(if (useFilter) "сканирование" else "сканирование (без фильтра, запасной режим)")
+        try {
+            if (useFilter) {
+                val filter = ScanFilter.Builder()
+                    .setServiceUuid(ParcelUuid(HR_SERVICE))
+                    .build()
+                val settings = ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .build()
+                scanner.startScan(listOf(filter), settings, scanCallback)
+            } else {
+                scanner.startScan(scanCallback) // фильтруем результат сами
+            }
+        } catch (e: Exception) {
+            onState("ошибка сканирования: ${e.message}")
+            scheduleRetry()
+        }
     }
 
+    private fun scheduleRetry() {
+        val delayMs = (5_000L shl minOf(scanFailures, 2)).coerceAtMost(30_000L)
+        android.os.Handler(context.mainLooper).postDelayed({ scan() }, delayMs)
+    }
+
+    @SuppressLint("MissingPermission")
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             if (!running) return
-            adapter.bluetoothLeScanner?.stopScan(this)
+            // в запасном режиме без фильтра отсекаем чужие устройства сами
+            if (scanFailures >= 2) {
+                val uuids = result.scanRecord?.serviceUuids ?: emptyList()
+                if (uuids.none { it.uuid == HR_SERVICE }) return
+            }
+            scanFailures = 0
+            try { adapter?.bluetoothLeScanner?.stopScan(this) } catch (_: Exception) {}
             onState("браслет найден: ${result.device.address}")
             connect(result.device)
         }
+
         override fun onScanFailed(errorCode: Int) {
-            onState("ошибка сканирования: $errorCode")
-            android.os.Handler(context.mainLooper).postDelayed({ scan() }, 5_000)
+            scanFailures++
+            val name = when (errorCode) {
+                1 -> "система отказала в регистрации (код 1) — лечу переподключением"
+                2 -> "сканирование слишком часто (код 2)"
+                else -> "код $errorCode"
+            }
+            onState("ошибка сканирования: $name")
+            scheduleRetry()
         }
     }
 
