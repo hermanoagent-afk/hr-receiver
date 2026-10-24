@@ -43,6 +43,7 @@ class BleHrClient(
     private var lastDataAt = 0L
     private var connected = false
     private var scanFailures = 0
+    private var scanningSince = 0L
     @Volatile private var running = false
 
     private val watchdog = object : Runnable {
@@ -52,6 +53,9 @@ class BleHrClient(
                 Log.w(TAG, "нет уведомлений 15 с — переподключение")
                 onState("нет данных — переподключение")
                 reconnect()
+            } else if (!connected && scanningSince > 0 &&
+                System.currentTimeMillis() - scanningSince > 60_000) {
+                onState("браслет не виден 60 с — похоже, он подключён к другому телефону (Pulsoid?)")
             }
             android.os.Handler(context.mainLooper).postDelayed(this, WATCHDOG_TICK_MS)
         }
@@ -105,6 +109,7 @@ class BleHrClient(
             } else {
                 scanner.startScan(scanCallback) // фильтруем результат сами
             }
+            scanningSince = System.currentTimeMillis()
         } catch (e: Exception) {
             onState("ошибка сканирования: ${e.message}")
             scheduleRetry()

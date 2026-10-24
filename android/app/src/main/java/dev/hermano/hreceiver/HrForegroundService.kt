@@ -22,6 +22,8 @@ class HrForegroundService : Service() {
         const val NOTIFICATION_ID = 1
         @Volatile var lastStatus: String = "запуск"
         @Volatile var lastBpm: Int = 0
+        @Volatile var lastBleState: String = ""
+        @Volatile var lastSendState: String = ""
     }
 
     private var buffer: LocalBuffer? = null
@@ -36,7 +38,7 @@ class HrForegroundService : Service() {
             val prefs = Prefs(this)
 
             sender = Sender(buf, prefs) { status ->
-                lastStatus = status
+                lastSendState = status
                 updateNotification()
             }
 
@@ -49,7 +51,7 @@ class HrForegroundService : Service() {
                     updateNotification()
                 },
                 onState = { status ->
-                    lastStatus = status
+                    lastBleState = status
                     updateNotification()
                 },
             )
@@ -123,7 +125,10 @@ class HrForegroundService : Service() {
     }
 
     private fun statusText(): String {
-        val bpm = if (lastBpm > 0) " · пульс $lastBpm" else ""
-        return "$lastStatus$bpm"
+        val parts = mutableListOf<String>()
+        if (lastBleState.isNotEmpty()) parts += lastBleState
+        if (lastSendState.isNotEmpty()) parts += lastSendState
+        if (lastBpm > 0) parts += "пульс $lastBpm"
+        return if (parts.isEmpty()) "запуск…" else parts.joinToString(" · ")
     }
 }

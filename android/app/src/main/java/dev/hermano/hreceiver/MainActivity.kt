@@ -76,6 +76,22 @@ class MainActivity : AppCompatActivity() {
 
         requestPermissions()
 
+        // живой статус из службы — обновляем каждые 2 с
+        val handler = android.os.Handler(mainLooper)
+        handler.post(object : Runnable {
+            override fun run() {
+                val s = HrForegroundService
+                if (s.lastBleState.isNotEmpty() || s.lastSendState.isNotEmpty()) {
+                    status.text = buildString {
+                        append("BLE: ${s.lastBleState.ifEmpty { "—" }}\n")
+                        append("отправка: ${s.lastSendState.ifEmpty { "—" }}")
+                        if (s.lastBpm > 0) append("\nпульс: ${s.lastBpm}")
+                    }
+                }
+                handler.postDelayed(this, 2000)
+            }
+        })
+
         saveBtn.setOnClickListener {
             var url = norm(serverInput.text.toString())
             var dev = norm(deviceInput.text.toString())
