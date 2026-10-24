@@ -14,7 +14,9 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 
 /**
  * Экран настройки: 3 пронумерованных поля + статус.
@@ -27,11 +29,18 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true) // контент не уезжает под статусбар
+        supportActionBar?.hide() // шапка перекрывала поле 1 — убираем
         prefs = Prefs(this)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 40, 48, 48)
+        }
+        // отступы от статусбара и нижней панели
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(48, 40 + sys.top, 48, 48 + sys.bottom)
+            insets
         }
 
         fun label(text: String) = TextView(this).apply {
@@ -41,7 +50,7 @@ class MainActivity : AppCompatActivity() {
 
         val serverInput = EditText(this).apply {
             hint = "https://..."
-            setText(prefs.serverUrl)
+            setText(prefs.serverUrl.ifEmpty { "https://formation-april-leads-diet.trycloudflare.com" })
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }
         val deviceInput = EditText(this).apply {
