@@ -56,10 +56,16 @@ class BleHrClient(
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun start() {
         running = true
         android.os.Handler(context.mainLooper).postDelayed(watchdog, WATCHDOG_TICK_MS)
-        scan()
+        try {
+            scan()
+        } catch (e: Exception) {
+            // чаще всего: нет разрешения Bluetooth или BT выключен
+            onState("не могу сканировать: ${e.message}")
+        }
     }
 
     fun stop() {

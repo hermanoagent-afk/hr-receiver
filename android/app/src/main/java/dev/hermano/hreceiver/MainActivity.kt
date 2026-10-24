@@ -54,11 +54,46 @@ class MainActivity : AppCompatActivity() {
         requestPermissions()
 
         saveBtn.setOnClickListener {
-            prefs.serverUrl = serverInput.text.toString().trim()
-            prefs.deviceId = deviceInput.text.toString().trim()
-            prefs.deviceKey = keyInput.text.toString().trim()
-            ContextCompat.startForegroundService(this, Intent(this, HrForegroundService::class.java))
-            status.text = "статус: служба запущена"
+            val url = serverInput.text.toString().trim()
+            val dev = deviceInput.text.toString().trim()
+            val key = keyInput.text.toString().trim()
+
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                status.text = "ошибка: адрес сервера должен начинаться с https://"
+                return@setOnClickListener
+            }
+            if (dev.isEmpty() || key.isEmpty()) {
+                status.text = "ошибка: заполни имя устройства и ключ"
+                return@setOnClickListener
+            }
+            if (!hasBtPermissions()) {
+                status.text = "нужны разрешения Bluetooth — нажми «Разрешить»"
+                requestPermissions()
+                return@setOnClickListener
+            }
+
+            prefs.serverUrl = url
+            prefs.deviceId = dev
+            prefs.deviceKey = key
+            try {
+                ContextCompat.startForegroundService(this, Intent(this, HrForegroundService::class.java))
+                status.text = "статус: служба запущена"
+            } catch (e: Exception) {
+                status.text = "ошибка запуска: ${e.message}"
+            }
+        }
+    }
+
+    private fun hasBtPermissions(): Boolean {
+        val need = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            need += Manifest.permission.BLUETOOTH_SCAN
+            need += Manifest.permission.BLUETOOTH_CONNECT
+        } else {
+            need += Manifest.permission.ACCESS_FINE_LOCATION
+        }
+        return need.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -67,6 +102,8 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             need += Manifest.permission.BLUETOOTH_SCAN
             need += Manifest.permission.BLUETOOTH_CONNECT
+        } else {
+            need += Manifest.permission.ACCESS_FINE_LOCATION
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             need += Manifest.permission.POST_NOTIFICATIONS
