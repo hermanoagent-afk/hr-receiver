@@ -35,6 +35,7 @@ class BleHrClient(
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private const val NO_DATA_TIMEOUT_MS = 15_000L
         private const val WATCHDOG_TICK_MS = 5_000L
+        private val KNOWN_NAMES = listOf("WHOOP", "fenix", "Garmin", "Forerunner", "Venu", "HRM", "Polar")
     }
 
     private val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -44,6 +45,8 @@ class BleHrClient(
     private var connected = false
     private var scanFailures = 0
     private var scanningSince = 0L
+    private val seen = mutableMapOf<String, String>()
+    private var lastSeenCount = 0
     @Volatile private var running = false
 
     private val watchdog = object : Runnable {
@@ -95,20 +98,11 @@ class BleHrClient(
         // сначала снимаем старую регистрацию — иначе система отвечает ошибкой 1
         try { scanner.stopScan(scanCallback) } catch (_: Exception) {}
 
-        val useFilter = scanFailures < 2
-        onState(if (useFilter) "сканирование" else "сканирование (без фильтра, запасной режим)")
+        // всегда сканируем без фильтра: фильтрованный скан на части OEM глушится,
+        // а так ещё видно всех вокруг для диагностики
+        onState("сканирование")
         try {
-            if (useFilter) {
-                val filter = ScanFilter.Builder()
-                    .setServiceUuid(ParcelUuid(HR_SERVICE))
-                    .build()
-                val settings = ScanSettings.Builder()
-                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                    .build()
-                scanner.startScan(listOf(filter), settings, scanCallback)
-            } else {
-                scanner.startScan(scanCallback) // фильтруем результат сами
-            }
+            scanner.startScan(scanCallback)
             scanningSince = System.currentTimeMillis()
         } catch (e: Exception) {
             onState("ошибка сканирования: ${e.message}")
@@ -125,14 +119,26 @@ class BleHrClient(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             if (!running) return
-            // в запасном режиме без фильтра отсекаем чужие устройства сами
-            if (scanFailures >= 2) {
-                val uuids = result.scanRecord?.serviceUuids ?: emptyList()
-                if (uuids.none { it.uuid == HR_SERVICE }) return
+            val addr = result.device.address
+            val name = result.scanRecord?.deviceName ?: ""
+            val uuids = result.scanRecord?.serviceUuids ?: emptyList()
+            val hasHrs = uuids.any { it.uuid == HR_SERVICE }
+            val knownName = KNOWN_NAMES.any { name.contains(it, ignoreCase = true) }
+
+            if (!hasHrs) {
+                seen[addr] = name.ifEmpty { addr }
+                if (seen.size != lastSeenCount) {
+                    lastSeenCount = seen.size
+                    val named = seen.values.firstOrNull { n -> KNOWN_NAMES.any { n.contains(it, true) } }
+                    onState("сканирование: вижу ${seen.size} устр." +
+                        if (knownName && named != null) ", есть $named (без трансляции пульса)" else "")
+                }
+                return
             }
+
             scanFailures = 0
             try { adapter?.bluetoothLeScanner?.stopScan(this) } catch (_: Exception) {}
-            onState("браслет найден: ${result.device.address}")
+            onState("нашёл кандидата: ${name.ifEmpty { addr }}" + if (hasHrs) "" else " (проверяю HRS)")
             connect(result.device)
         }
 
@@ -181,7 +187,10 @@ class BleHrClient(
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             val ch = g.getService(HR_SERVICE)?.getCharacteristic(HR_MEASUREMENT) ?: run {
-                onState("HRS не найден на устройстве")
+                onState("на устройстве нет HRS — ищу дальше")
+                connected = false
+                g.close()
+                android.os.Handler(context.mainLooper).postDelayed({ scan() }, 2_000)
                 return
             }
             g.setCharacteristicNotification(ch, true)
