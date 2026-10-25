@@ -8,9 +8,17 @@ import android.database.sqlite.SQLiteOpenHelper
 /**
  * Буфер на телефоне (предложение, п. 3.1): SQLite, 7 дней,
  * удаление только после подтверждения сервера (acked_to).
+ *
+ * Пишет BLE-поток, читает/удаляет поток отправки. SQLiteOpenHelper держит одно
+ * соединение и сериализует доступ — это безопасно. WAL — чтобы чтение пачки
+ * не блокировало запись очередного удара.
  */
 class LocalBuffer(context: Context) :
-    SQLiteOpenHelper(context, "hr_buffer.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "hr_buffer.db", null, 1) {
+
+    init {
+        setWriteAheadLoggingEnabled(true)
+    }
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -23,12 +31,15 @@ class LocalBuffer(context: Context) :
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {}
 
-    fun put(ts: Long, bpm: Int) {
+    /** Никогда не бросает: ошибка записи одного удара не должна убить BLE-поток. */
+    fun put(ts: Long, bpm: Int): Boolean = try {
         val cv = ContentValues().apply {
             put("ts", ts)
             put("bpm", bpm)
         }
-        writableDatabase.insertWithOnConflict("readings", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+        writableDatabase.insertWithOnConflict("readings", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+    } catch (_: Exception) {
+        false
     }
 
     fun unsent(limit: Int = 500): List<Pair<Long, Int>> {
@@ -44,10 +55,16 @@ class LocalBuffer(context: Context) :
         writableDatabase.execSQL("DELETE FROM readings WHERE ts <= ?", arrayOf(ackedTo))
     }
 
-    fun count(): Long =
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM readings", null).use { it.moveToFirst(); it.getLong(0) }
+    fun count(): Long = try {
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM readings", null)
+            .use { if (it.moveToFirst()) it.getLong(0) else 0L }
+    } catch (_: Exception) {
+        -1L
+    }
 
     fun pruneOlderThan(cutoff: Long) {
-        writableDatabase.execSQL("DELETE FROM readings WHERE ts < ?", arrayOf(cutoff))
+        try {
+            writableDatabase.execSQL("DELETE FROM readings WHERE ts < ?", arrayOf(cutoff))
+        } catch (_: Exception) {}
     }
 }
