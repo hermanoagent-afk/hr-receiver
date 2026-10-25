@@ -156,6 +156,36 @@ def main():
     check("7c. различаем «браслет молчит» (alive, пульс старый) от «телефон умер» (!alive)",
           by_id["phone-1"]["alive"] is True and by_id["phone-4"]["alive"] is False)
 
+    # --- 8. события: причины дыр + имя оператора (требования Витала) ---
+    now = now_ms()
+    requests.post(BASE + "/ingest",
+                  json={"device": "phone-2", "sent_at": now, "status": {"operator": "Сева"}, "hr": []},
+                  headers={"X-Device-Key": "sbx-key-2"}, timeout=10)
+    gap_start = now - 7_200_000  # дыра два часа назад
+    d2.measure_span(gap_start, 10)
+    d2.flush()
+    d2.measure_span(gap_start + 300_000, 10)  # возобновление через 5 минут
+    d2.flush()
+    requests.post(BASE + "/events",
+                  json={"device": "phone-2", "sent_at": now,
+                        "events": [[gap_start + 5_000, "bt_off", "браслет отключился"]]},
+                  headers={"X-Device-Key": "sbx-key-2"}, timeout=10)
+    g = requests.get(BASE + "/gaps",
+                     params={"from": gap_start - 60_000, "to": gap_start + 400_000}, timeout=10).json()
+    check("8a. дыра >60с объяснена событием bt_off",
+          bool(g["gaps"]) and g["gaps"][0]["explained"] and g["explained_pct"] == 100.0,
+          f"explained={g['gaps'][0]['explained'] if g['gaps'] else None}, pct={g['explained_pct']}")
+    ev = requests.get(BASE + "/events",
+                      params={"from": gap_start, "to": gap_start + 10_000}, timeout=10).json()["events"]
+    check("8b. событие сохранено с типом и деталью",
+          bool(ev) and ev[0]["type"] == "bt_off" and ev[0]["detail"] == "браслет отключился",
+          f"events={ev}")
+    rows = requests.get(BASE + "/series",
+                        params={"from": gap_start, "to": gap_start + 5_000}, timeout=10).json()["rows"]
+    check("8c. имя оператора (Сева) в итоговом журнале",
+          bool(rows) and rows[0].get("source_name") == "Сева",
+          f"source_name={rows[0].get('source_name') if rows else None}")
+
     # --- итог ---
     ok = sum(1 for _, c, _ in RESULTS if c)
     print(f"\nИТОГО: {ok}/{len(RESULTS)} прошло")

@@ -57,9 +57,19 @@ def create_app(store: Store, seed_devices=None) -> Flask:
         inserted = store.insert_hr(dev["id"], hr, server_now)
 
         has_status = isinstance(data.get("status"), dict)
+        if has_status:
+            # имя того, кто держит телефон (Сева / папа / мама)
+            op = str((data.get("status") or {}).get("operator") or "").strip()
+            if op:
+                store.set_operator(dev["id"], op)
         if has_status or not hr:
             alive_ts = sent_at + (offset if correct else 0)
             store.insert_alive(dev["id"], alive_ts, server_now)
+
+        # события (причины разрывов) — приходят в той же пачке
+        ev = [(int(t) + (offset if correct else 0), str(ty), str(det))
+              for t, ty, det in data.get("events", [])]
+        ev_inserted = store.insert_events(dev["id"], ev, server_now) if ev else 0
 
         store.log_offset(dev["id"], offset, server_now)
 
@@ -68,9 +78,37 @@ def create_app(store: Store, seed_devices=None) -> Flask:
             "ok": True,
             "acked_to": sent_at,
             "inserted": inserted,
+            "events": ev_inserted,
             "clock_offset_ms": offset,
             "corrected": correct,
         })
+
+    @app.post("/events")
+    def events_post():
+        """Отдельный канал событий: [[ts, type, detail], ...]."""
+        dev = auth_device()
+        if not dev:
+            return jsonify({"error": "bad device key"}), 401
+        data = request.get_json(force=True, silent=True) or {}
+        if data.get("device") != dev["id"]:
+            return jsonify({"error": "device mismatch"}), 403
+        server_now = now_ms()
+        sent_at = int(data.get("sent_at", server_now))
+        offset = server_now - sent_at
+        correct = abs(offset) > CLOCK_SKEW_THRESHOLD_MS
+        ev = [(int(t) + (offset if correct else 0), str(ty), str(det))
+              for t, ty, det in data.get("events", [])]
+        n = store.insert_events(dev["id"], ev, server_now)
+        store.insert_alive(dev["id"], sent_at + (offset if correct else 0), server_now)
+        return jsonify({"ok": True, "acked_to": sent_at, "events": n})
+
+    @app.get("/events")
+    def events_get():
+        from_ts, to_ts = _range()
+        rows = store.events_range(from_ts, to_ts)
+        return jsonify({"events": [
+            {"device": d, "t": t, "type": ty, "detail": det} for d, t, ty, det in rows
+        ]})
 
     @app.get("/status")
     def status():
@@ -106,8 +144,10 @@ def create_app(store: Store, seed_devices=None) -> Flask:
     def series():
         from_ts, to_ts = _range()
         merged = _merged(from_ts, to_ts)
+        ops = store.operator_map()
         return jsonify({"from": from_ts, "to": to_ts,
-                        "rows": [{"t": t, "bpm": b, "source": s} for t, b, s in merged]})
+                        "rows": [{"t": t, "bpm": b, "source": s,
+                                  "source_name": ops.get(s, "")} for t, b, s in merged]})
 
     @app.get("/journal")
     def journal():
@@ -119,9 +159,19 @@ def create_app(store: Store, seed_devices=None) -> Flask:
 
     @app.get("/gaps")
     def gaps_api():
+        """Дыры с объяснениями из событий — требование Витала (>=90% дыр объяснены)."""
         from_ts, to_ts = _range()
         merged = _merged(from_ts, to_ts)
-        return jsonify({"gaps": gaps(merged)})
+        out = []
+        for g in gaps(merged):
+            ev = store.events_range(g["from"] - 60_000, g["to"])
+            g["explained_by"] = [
+                {"device": d, "t": t, "type": ty, "detail": det} for d, t, ty, det in ev
+            ]
+            g["explained"] = bool(ev)
+            out.append(g)
+        explained_pct = round(100 * sum(1 for g in out if g["explained"]) / len(out), 1) if out else 100.0
+        return jsonify({"gaps": out, "explained_pct": explained_pct})
 
     @app.get("/raw/<device>")
     def raw(device):

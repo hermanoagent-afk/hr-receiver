@@ -140,6 +140,7 @@ class Sender(
                 put("ble", ble.phase.name.lowercase())
                 put("ble_detail", ble.detail)
                 put("source", ble.deviceName)
+                put("operator", prefs.operatorName)
                 if (ble.lastDataAt > 0) put("last_hr_at", ble.lastDataAt)
                 put("queue", rows.size)
                 put("app", BuildConfig.VERSION_NAME)

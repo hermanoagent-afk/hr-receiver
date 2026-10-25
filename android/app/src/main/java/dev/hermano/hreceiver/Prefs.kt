@@ -71,6 +71,11 @@ class Prefs private constructor(private val sp: SharedPreferences) {
         get() = str("device_key")
         set(v) = putStr("device_key", v)
 
+    /** Имя того, кто держит телефон: Сева / папа / мама. */
+    var operatorName: String
+        get() = str("operator_name")
+        set(v) = putStr("operator_name", v)
+
     var deviceId: String
         get() = str("device_id")
         set(v) = putStr("device_id", v)

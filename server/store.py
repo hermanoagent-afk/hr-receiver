@@ -36,8 +36,16 @@ CREATE TABLE IF NOT EXISTS clock_offsets (
     offset_ms INTEGER NOT NULL,
     at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS events (
+    device TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    detail TEXT DEFAULT '',
+    received_at INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_raw_ts ON raw_hr (ts);
 CREATE INDEX IF NOT EXISTS idx_alive_ts ON alive (ts);
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts);
 """
 
 
@@ -50,6 +58,11 @@ class Store:
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.lock = threading.Lock()
         self.conn.executescript(SCHEMA)
+        # миграция: имя оператора (Сева / папа / мама) у каждого приёмника
+        try:
+            self.conn.execute("ALTER TABLE devices ADD COLUMN operator TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         self.conn.commit()
 
     # --- devices ---
@@ -69,11 +82,20 @@ class Store:
             return None
         return {"id": row[0], "name": row[1], "priority": row[2]}
 
+    def set_operator(self, device_id: str, operator: str):
+        """Имя того, кто держит телефон (Сева / папа / мама)."""
+        with self.lock:
+            self.conn.execute("UPDATE devices SET operator = ? WHERE id = ?", (operator, device_id))
+            self.conn.commit()
+
+    def operator_map(self):
+        return {r[0]: (r[1] or "") for r in self.conn.execute("SELECT id, operator FROM devices")}
+
     def devices(self):
         rows = self.conn.execute(
-            "SELECT id, name, priority FROM devices ORDER BY priority"
+            "SELECT id, name, priority, operator FROM devices ORDER BY priority"
         ).fetchall()
-        return [{"id": r[0], "name": r[1], "priority": r[2]} for r in rows]
+        return [{"id": r[0], "name": r[1], "priority": r[2], "operator": r[3] or ""} for r in rows]
 
     def priority_map(self):
         return {r[0]: r[1] for r in self.conn.execute("SELECT id, priority FROM devices")}
@@ -104,6 +126,22 @@ class Store:
                 (device, int(offset_ms), at),
             )
             self.conn.commit()
+
+    def insert_events(self, device: str, rows, received_at: int) -> int:
+        """rows: [(ts, type, detail), ...]. Причины разрывов — требование Витала."""
+        with self.lock:
+            cur = self.conn.executemany(
+                "INSERT INTO events (device, ts, type, detail, received_at) VALUES (?,?,?,?,?)",
+                [(device, int(ts), str(t), str(d or ""), received_at) for ts, t, d in rows],
+            )
+            self.conn.commit()
+            return cur.rowcount
+
+    def events_range(self, from_ts: int, to_ts: int):
+        return self.conn.execute(
+            "SELECT device, ts, type, detail FROM events WHERE ts >= ? AND ts <= ? ORDER BY ts",
+            (from_ts, to_ts),
+        ).fetchall()
 
     def min_offset(self, device: str):
         """Минимальное наблюдаемое расхождение = часы + минимальная задержка сети."""

@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
         const val DEFAULT_SERVER = "https://formation-april-leads-diet.trycloudflare.com"
         const val DEFAULT_DEVICE = "phone-1"
         const val DEFAULT_KEY = "sbx-key-1"
+        const val DEFAULT_OPERATOR = "Сева"
     }
 
     private lateinit var prefs: Prefs
@@ -47,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var serverInput: EditText
     private lateinit var deviceInput: EditText
     private lateinit var keyInput: EditText
+    private lateinit var operatorInput: EditText
     private lateinit var statusCard: LinearLayout
     private lateinit var tvStatusPhase: TextView
     private lateinit var tvStatusDetail: TextView
@@ -83,6 +85,7 @@ class MainActivity : AppCompatActivity() {
         if (prefs.serverUrl.isBlank()) prefs.serverUrl = DEFAULT_SERVER
         if (prefs.deviceId.isBlank()) prefs.deviceId = DEFAULT_DEVICE
         if (prefs.deviceKey.isBlank()) prefs.deviceKey = DEFAULT_KEY
+        if (prefs.operatorName.isBlank()) prefs.operatorName = DEFAULT_OPERATOR
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -275,6 +278,15 @@ class MainActivity : AppCompatActivity() {
             setText(prefs.deviceKey)
         }
 
+        operatorInput = EditText(this).apply {
+            hint = "например: Сева / папа / мама"
+            setHintTextColor(Color.parseColor("#455A64"))
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#171C24"))
+            setPadding(24, 20, 24, 20)
+            setText(prefs.operatorName)
+        }
+
         val btnSaveConfig = Button(this).apply {
             text = "Сохранить настройки"
             setBackgroundColor(Color.parseColor("#263238"))
@@ -298,6 +310,8 @@ class MainActivity : AppCompatActivity() {
         settingsSection.addView(deviceInput)
         settingsSection.addView(fieldLabel("Ключ авторизации"))
         settingsSection.addView(keyInput)
+        settingsSection.addView(fieldLabel("Кто с этим телефоном (имя)"))
+        settingsSection.addView(operatorInput)
         settingsSection.addView(btnSaveConfig)
 
         val btnToggleSettings = Button(this).apply {
@@ -352,11 +366,12 @@ class MainActivity : AppCompatActivity() {
         )
 
         val pref = prefs.preferredName.ifEmpty { prefs.preferredAddress }
-        tvPreferredDevice.text = if (pref.isNotEmpty()) {
-            "Выбранное устройство: $pref (только оно)"
+        val src = if (pref.isNotEmpty()) {
+            "Источник: $pref (только он)"
         } else {
             "Источник: первый обнаруженный с 0x180D"
         }
+        tvPreferredDevice.text = "Телефон: ${prefs.operatorName}\n$src"
 
         when (b.phase) {
             Phase.STOPPED -> {
@@ -531,6 +546,7 @@ class MainActivity : AppCompatActivity() {
         prefs.serverUrl = url
         prefs.deviceId = dev
         prefs.deviceKey = key
+        prefs.operatorName = norm(operatorInput.text.toString()).ifEmpty { DEFAULT_OPERATOR }
         tvStatusDetail.text = "Настройки сохранены."
         return true
     }
