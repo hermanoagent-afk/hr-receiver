@@ -35,6 +35,13 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        // Конфиг сандбокса встроен в приложение — вводить ничего не нужно
+        const val DEFAULT_SERVER = "https://formation-april-leads-diet.trycloudflare.com"
+        const val DEFAULT_DEVICE = "phone-1"
+        const val DEFAULT_KEY = "sbx-key-1"
+    }
+
     private lateinit var prefs: Prefs
 
     private lateinit var serverInput: EditText
@@ -71,6 +78,11 @@ class MainActivity : AppCompatActivity() {
         supportActionBar?.hide()
 
         prefs = Prefs.get(this)
+
+        // Предзаполнение конфига: пользователь ничего не вводит
+        if (prefs.serverUrl.isBlank()) prefs.serverUrl = DEFAULT_SERVER
+        if (prefs.deviceId.isBlank()) prefs.deviceId = DEFAULT_DEVICE
+        if (prefs.deviceKey.isBlank()) prefs.deviceKey = DEFAULT_KEY
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -275,20 +287,44 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { saveConfig() }
         }
 
-        root.addView(fieldLabel("1. Адрес сервера (HTTPS обязательно)"))
-        root.addView(serverInput)
-        root.addView(fieldLabel("2. ID клиента (device)"))
-        root.addView(deviceInput)
-        root.addView(fieldLabel("3. Ключ авторизации (X-Device-Key)"))
-        root.addView(keyInput)
-        root.addView(btnSaveConfig)
+        // --- НАСТРОЙКИ СЕРВЕРА: скрыты, обычному пользователю не нужны ---
+        val settingsSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        settingsSection.addView(fieldLabel("Адрес сервера (HTTPS)"))
+        settingsSection.addView(serverInput)
+        settingsSection.addView(fieldLabel("ID клиента"))
+        settingsSection.addView(deviceInput)
+        settingsSection.addView(fieldLabel("Ключ авторизации"))
+        settingsSection.addView(keyInput)
+        settingsSection.addView(btnSaveConfig)
+
+        val btnToggleSettings = Button(this).apply {
+            text = "⚙ Сервер и ключ (обычно не нужно)"
+            setBackgroundColor(Color.parseColor("#1C2530"))
+            setTextColor(Color.parseColor("#78909C"))
+            textSize = 12f
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 16) }
+            layoutParams = lp
+            setOnClickListener {
+                settingsSection.visibility =
+                    if (settingsSection.visibility == View.GONE) View.VISIBLE else View.GONE
+            }
+        }
+        root.addView(btnToggleSettings)
+        root.addView(settingsSection)
 
         // --- СПИСОК УСТРОЙСТВ BLE ВОКРУГ ---
         tvDevicesHeader = TextView(this).apply {
-            text = "Устройства вокруг (нажмите для выбора источника):"
+            text = "Источник пульса. Чтобы поменять — нажмите «Выбрать» у нужного " +
+                "(например, WHOOP). «Забыть» = снова автоматический выбор:"
             setTextColor(Color.WHITE)
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
+            textSize = 13f
+            setLineSpacing(4f, 1f)
             setPadding(0, 8, 0, 12)
         }
         devicesContainer = LinearLayout(this).apply {
