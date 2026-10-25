@@ -151,11 +151,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun hasBtPermissions(): Boolean {
         val need = mutableListOf<String>()
+        // Android требует FINE_LOCATION для отдачи результатов BLE-скана
+        // (даже на 12+, если BLUETOOTH_SCAN без флага neverForLocation)
+        need += Manifest.permission.ACCESS_FINE_LOCATION
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             need += Manifest.permission.BLUETOOTH_SCAN
             need += Manifest.permission.BLUETOOTH_CONNECT
-        } else {
-            need += Manifest.permission.ACCESS_FINE_LOCATION
         }
         return need.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
@@ -164,11 +165,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestPermissions() {
         val need = mutableListOf<String>()
+        need += Manifest.permission.ACCESS_FINE_LOCATION
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             need += Manifest.permission.BLUETOOTH_SCAN
             need += Manifest.permission.BLUETOOTH_CONNECT
-        } else {
-            need += Manifest.permission.ACCESS_FINE_LOCATION
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             need += Manifest.permission.POST_NOTIFICATIONS
