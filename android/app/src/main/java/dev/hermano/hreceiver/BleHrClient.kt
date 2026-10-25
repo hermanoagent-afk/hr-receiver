@@ -68,7 +68,7 @@ class BleHrClient(
                 onState(if (seen.isEmpty())
                     "не вижу НИКАКИХ BT-устройств 60 с — проверь Геолокацию и Bluetooth"
                 else
-                    "вижу ${seen.size} устр., но датчика пульса нет — возможно, он подключён к другому телефону (Pulsoid?)")
+                    "вижу ${seen.size} устр., но часы не транслируют пульс — проверь ЭКРАН ТРАНСЛЯЦИИ на часах")
             }
             android.os.Handler(context.mainLooper).postDelayed(this, WATCHDOG_TICK_MS)
         }
@@ -150,10 +150,14 @@ class BleHrClient(
 
             if (seen[addr]?.first != name || seen[addr]?.second != hasHrs) {
                 seen[addr] = name.ifEmpty { addr } to hasHrs
+                // сначала: датчики пульса (♥), потом именованные, потом анонимные MAC
                 seenSummary = seen.values
-                    .sortedByDescending { it.second }
-                    .takeLast(15)
-                    .joinToString("\n") { (n, h) -> (if (h) "♥ " else "· ") + n }
+                    .sortedWith(compareByDescending<Pair<String, Boolean>> { it.second }
+                        .thenByDescending { it.first.any { c -> c.isLetter() } })
+                    .take(20)
+                    .joinToString("\n") { (n, h) ->
+                        (if (h) "♥ " else if (n.any { it.isLetter() }) "• " else "· ") + n
+                    }
             }
             if (seen.size != lastSeenCount) {
                 lastSeenCount = seen.size
