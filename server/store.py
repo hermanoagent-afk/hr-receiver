@@ -174,3 +174,10 @@ class Store:
             "SELECT MAX(ts), COUNT(*) FROM raw_hr WHERE device = ?", (device,)
         ).fetchone()
         return row[0], row[1]
+
+    def last_hr_any(self):
+        """Последнее значение пульса с любого приёмника."""
+        row = self.conn.execute(
+            "SELECT ts, bpm, device FROM raw_hr ORDER BY ts DESC LIMIT 1"
+        ).fetchone()
+        return row if row else None

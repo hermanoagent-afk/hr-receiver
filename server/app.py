@@ -25,16 +25,43 @@ from store import Store, now_ms
 CLOCK_SKEW_THRESHOLD_MS = 2_000
 
 
-def create_app(store: Store, seed_devices=None) -> Flask:
+def create_app(store: Store, seed_devices=None, api_token: str = "") -> Flask:
     app = Flask(__name__)
 
     if seed_devices:
         for d in seed_devices:
             store.add_device(**d)
 
+    # CORS: дашборд на Vercel и внешние виджеты ходят с других доменов
+    @app.after_request
+    def cors(resp):
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Device-Key, X-Api-Token"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        return resp
+
+    @app.route("/ingest", methods=["OPTIONS"])
+    @app.route("/events", methods=["OPTIONS"])
+    @app.route("/api/<path:_>", methods=["OPTIONS"])
+    def cors_preflight(_=None):
+        return "", 204
+
     def auth_device():
         key = request.headers.get("X-Device-Key", "")
         return store.device_by_key(key)
+
+    def auth_api():
+        """Публичный API по токену — как access token у Pulsoid."""
+        if not api_token:
+            return False
+        tok = request.headers.get("X-Api-Token", "") or request.args.get("token", "")
+        return tok == api_token
+
+    def check_api():
+        """Чтение данных закрыто токеном (если токен задан). Без токена (тесты) — открыто."""
+        if api_token and not auth_api():
+            return jsonify({"error": "bad api token"}), 401
+        return None
 
     @app.post("/ingest")
     def ingest():
@@ -104,6 +131,9 @@ def create_app(store: Store, seed_devices=None) -> Flask:
 
     @app.get("/events")
     def events_get():
+        err = check_api()
+        if err:
+            return err
         from_ts, to_ts = _range()
         rows = store.events_range(from_ts, to_ts)
         return jsonify({"events": [
@@ -112,6 +142,9 @@ def create_app(store: Store, seed_devices=None) -> Flask:
 
     @app.get("/status")
     def status():
+        err = check_api()
+        if err:
+            return err
         out = []
         now = now_ms()
         for d in store.devices():
@@ -121,6 +154,7 @@ def create_app(store: Store, seed_devices=None) -> Flask:
                 "id": d["id"],
                 "name": d["name"],
                 "priority": d["priority"],
+                "operator": d.get("operator", ""),
                 "alive": last_alive is not None and now - last_alive < 5 * 60_000,
                 "last_alive_ms": last_alive,
                 "last_hr_ms": last_hr_ts,
@@ -142,6 +176,9 @@ def create_app(store: Store, seed_devices=None) -> Flask:
 
     @app.get("/series")
     def series():
+        err = check_api()
+        if err:
+            return err
         from_ts, to_ts = _range()
         merged = _merged(from_ts, to_ts)
         ops = store.operator_map()
@@ -160,6 +197,9 @@ def create_app(store: Store, seed_devices=None) -> Flask:
     @app.get("/gaps")
     def gaps_api():
         """Дыры с объяснениями из событий — требование Витала (>=90% дыр объяснены)."""
+        err = check_api()
+        if err:
+            return err
         from_ts, to_ts = _range()
         merged = _merged(from_ts, to_ts)
         out = []
@@ -179,16 +219,61 @@ def create_app(store: Store, seed_devices=None) -> Flask:
         rows = store.raw_range(from_ts, to_ts)
         return jsonify({"rows": [{"t": t, "bpm": b} for d, t, b in rows if d == device]})
 
+    # === Публичный API по токену (аналог access token у Pulsoid) ===
+
+    @app.get("/api/live")
+    def api_live():
+        """Живой пульс — формат близок к Pulsoid: measured_at + data.heart_rate."""
+        if not auth_api():
+            return jsonify({"error": "bad api token"}), 401
+        row = store.last_hr_any()
+        if not row:
+            return jsonify({"measured_at": None, "data": {"heart_rate": None}})
+        ts, bpm, dev = row
+        return jsonify({
+            "measured_at": ts,
+            "data": {"heart_rate": bpm},
+            "source": dev,
+            "source_name": store.operator_map().get(dev, ""),
+        })
+
+    @app.get("/api/hr")
+    def api_hr():
+        """История пульса: ?from=&to= (мс)."""
+        if not auth_api():
+            return jsonify({"error": "bad api token"}), 401
+        from_ts, to_ts = _range()
+        merged = _merged(from_ts, to_ts)
+        ops = store.operator_map()
+        return jsonify({
+            "from": from_ts, "to": to_ts,
+            "rows": [{"t": t, "bpm": b, "source_name": ops.get(s, "")} for t, b, s in merged],
+        })
+
     return app
+
+
+def load_or_create_token() -> str:
+    """Один постоянный API-токен — хранится рядом с БД."""
+    import os
+    import uuid
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_token.txt")
+    if os.path.exists(p):
+        return open(p).read().strip()
+    tok = "hrt_" + uuid.uuid4().hex
+    with open(p, "w") as f:
+        f.write(tok)
+    return tok
 
 
 def main():
     store = Store("sandbox.db")
+    token = load_or_create_token()
     app = create_app(store, seed_devices=[
         {"device_id": "phone-1", "name": "телефон рядом", "api_key": "sbx-key-1", "priority": 10},
         {"device_id": "phone-2", "name": "телефон запасной", "api_key": "sbx-key-2", "priority": 20},
         {"device_id": "phone-3", "name": "pi-кухня", "api_key": "sbx-key-3", "priority": 30},
-    ])
+    ], api_token=token)
     app.run(host="127.0.0.1", port=8091)
 
 

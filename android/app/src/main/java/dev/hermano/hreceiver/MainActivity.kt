@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         // Конфиг сандбокса встроен в приложение — вводить ничего не нужно
-        const val DEFAULT_SERVER = "https://formation-april-leads-diet.trycloudflare.com"
+        const val DEFAULT_SERVER = "https://bargain-peter-birds-usual.trycloudflare.com"
         const val DEFAULT_DEVICE = "phone-1"
         const val DEFAULT_KEY = "sbx-key-1"
         const val DEFAULT_OPERATOR = "Сева"
