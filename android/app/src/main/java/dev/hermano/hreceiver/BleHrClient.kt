@@ -58,7 +58,10 @@ class BleHrClient(
                 reconnect()
             } else if (!connected && scanningSince > 0 &&
                 System.currentTimeMillis() - scanningSince > 60_000) {
-                onState("браслет не виден 60 с — похоже, он подключён к другому телефону (Pulsoid?)")
+                onState(if (seen.isEmpty())
+                    "не вижу НИКАКИХ BT-устройств 60 с — проверь Геолокацию и Bluetooth"
+                else
+                    "вижу ${seen.size} устр., но датчика пульса нет — возможно, он подключён к другому телефону (Pulsoid?)")
             }
             android.os.Handler(context.mainLooper).postDelayed(this, WATCHDOG_TICK_MS)
         }
@@ -97,6 +100,18 @@ class BleHrClient(
 
         // сначала снимаем старую регистрацию — иначе система отвечает ошибкой 1
         try { scanner.stopScan(scanCallback) } catch (_: Exception) {}
+
+        // Android требует включённую геолокацию для отдачи результатов BLE-скана
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        val locOn = try {
+            lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+                lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+        } catch (_: Exception) { true }
+        if (!locOn) {
+            onState("ВКЛЮЧИ ГЕОЛОКАЦИЮ — без неё Android не отдаёт Bluetooth-скан")
+            android.os.Handler(context.mainLooper).postDelayed({ scan() }, 5_000)
+            return
+        }
 
         // всегда сканируем без фильтра: фильтрованный скан на части OEM глушится,
         // а так ещё видно всех вокруг для диагностики
