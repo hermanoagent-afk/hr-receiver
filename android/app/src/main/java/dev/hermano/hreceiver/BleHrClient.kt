@@ -35,7 +35,14 @@ class BleHrClient(
         val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private const val NO_DATA_TIMEOUT_MS = 15_000L
         private const val WATCHDOG_TICK_MS = 5_000L
-        private val KNOWN_NAMES = listOf("WHOOP", "fenix", "Garmin", "Forerunner", "Venu", "HRM", "Polar")
+        private val KNOWN_NAMES = listOf("whoop", "fenix", "garmin", "forerunner", "venu", "hrm", "polar", "hr broadcast")
+
+        /** «fēnix» -> «fenix»: убираем диакритику перед поиском имени. */
+        private fun normName(s: String): String =
+            java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}"), "")
+
+        @Volatile var seenSummary: String = ""
     }
 
     private val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -45,7 +52,7 @@ class BleHrClient(
     private var connected = false
     private var scanFailures = 0
     private var scanningSince = 0L
-    private val seen = mutableMapOf<String, String>()
+    private val seen = mutableMapOf<String, Pair<String, Boolean>>() // addr -> (name, hasHrs)
     private var lastSeenCount = 0
     @Volatile private var running = false
 
@@ -138,18 +145,23 @@ class BleHrClient(
             val name = result.scanRecord?.deviceName ?: ""
             val uuids = result.scanRecord?.serviceUuids ?: emptyList()
             val hasHrs = uuids.any { it.uuid == HR_SERVICE }
-            val knownName = KNOWN_NAMES.any { name.contains(it, ignoreCase = true) }
+            val norm = normName(name)
+            val knownName = KNOWN_NAMES.any { norm.contains(it) }
 
-            if (!hasHrs) {
-                seen[addr] = name.ifEmpty { addr }
-                if (seen.size != lastSeenCount) {
-                    lastSeenCount = seen.size
-                    val named = seen.values.firstOrNull { n -> KNOWN_NAMES.any { n.contains(it, true) } }
-                    onState("сканирование: вижу ${seen.size} устр." +
-                        if (knownName && named != null) ", есть $named (без трансляции пульса)" else "")
-                }
-                return
+            if (seen[addr]?.first != name || seen[addr]?.second != hasHrs) {
+                seen[addr] = name.ifEmpty { addr } to hasHrs
+                seenSummary = seen.values
+                    .sortedByDescending { it.second }
+                    .takeLast(15)
+                    .joinToString("\n") { (n, h) -> (if (h) "♥ " else "· ") + n }
             }
+            if (seen.size != lastSeenCount) {
+                lastSeenCount = seen.size
+                onState("сканирование: вижу ${seen.size} устр." +
+                    if (hasHrs) "" else if (knownName) ", есть $name" else "")
+            }
+
+            if (!hasHrs && !knownName) return
 
             scanFailures = 0
             try { adapter?.bluetoothLeScanner?.stopScan(this) } catch (_: Exception) {}

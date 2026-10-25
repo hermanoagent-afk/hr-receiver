@@ -86,6 +86,8 @@ class MainActivity : AppCompatActivity() {
                         append("BLE: ${s.lastBleState.ifEmpty { "—" }}\n")
                         append("отправка: ${s.lastSendState.ifEmpty { "—" }}")
                         if (s.lastBpm > 0) append("\nпульс: ${s.lastBpm}")
+                        val seen = BleHrClient.seenSummary
+                        if (seen.isNotEmpty()) append("\n\nустройства:\n").append(seen)
                     }
                 }
                 handler.postDelayed(this, 2000)
