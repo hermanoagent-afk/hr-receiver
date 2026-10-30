@@ -189,6 +189,9 @@ def create_app(store: Store, seed_devices=None, api_token: str = "") -> Flask:
     @app.get("/journal")
     def journal():
         """Формат текущего журнала сборщика: {t: <мс>, bpm} — по одной записи на строку."""
+        err = check_api()
+        if err:
+            return err
         from_ts, to_ts = _range()
         merged = _merged(from_ts, to_ts)
         lines = ['{"t": %d, "bpm": %d}' % (t, b) for t, b, _ in merged]
@@ -213,11 +216,14 @@ def create_app(store: Store, seed_devices=None, api_token: str = "") -> Flask:
         explained_pct = round(100 * sum(1 for g in out if g["explained"]) / len(out), 1) if out else 100.0
         return jsonify({"gaps": out, "explained_pct": explained_pct})
 
-    @app.get("/raw/<device>")
-    def raw(device):
+    @app.get("/raw/<device_id>")
+    def raw(device_id):
+        err = check_api()
+        if err:
+            return err
         from_ts, to_ts = _range()
         rows = store.raw_range(from_ts, to_ts)
-        return jsonify({"rows": [{"t": t, "bpm": b} for d, t, b in rows if d == device]})
+        return jsonify({"rows": [{"t": t, "bpm": b} for d, t, b in rows if d == device_id]})
 
     # === Публичный API по токену (аналог access token у Pulsoid) ===
 

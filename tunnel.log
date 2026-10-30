@@ -39,3 +39,4 @@
 2026-10-25T14:14:21Z INF precheck component="Cloudflare API" details="API is reachable" run_id=1dd070e2-e365-4b29-b917-a54e80c289d1 status=pass target=api.cloudflare.com:443
 2026-10-25T14:14:21Z INF precheck complete hard_fail=false run_id=1dd070e2-e365-4b29-b917-a54e80c289d1 suggested_protocol=quic
 2026-10-25T14:14:21Z INF Registered tunnel connection connIndex=0 connection=54700694-10eb-46c9-9090-b84b0ecd6c9f event=0 ip=2606:4700:a0::5 location=waw03 protocol=quic
+2026-10-26T14:14:21Z WRN Your version 2026.8.2 is outdated. We recommend upgrading it to 2026.10.4
